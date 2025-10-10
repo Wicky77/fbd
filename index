@@ -1,0 +1,319 @@
+import pygame
+import sys
+import os
+
+# Инициализация Pygame
+pygame.init()
+
+# Настройки экрана
+WIDTH, HEIGHT = 800, 600
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Трехэтажная игра с прыжком и скинами")
+
+# Цвета
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)
+BROWN = (139, 69, 19)
+GRAY = (128, 128, 128)
+SKIN = (255, 204, 153)
+JEANS = (0, 0, 128)
+PURPLE = (128, 0, 128)
+ORANGE = (255, 165, 0)
+BUTTON_COLOR = (70, 130, 180)
+BUTTON_HOVER_COLOR = (100, 160, 210)
+
+
+# Загрузка фона
+def load_background():
+    try:
+        # Попробуйте загрузить фон из файла
+        background = pygame.image.load('background.png').convert()
+        background = pygame.transform.scale(background, (WIDTH, HEIGHT))
+        return background
+    except:
+        # Если файла нет, создаем простой градиентный фон
+        background = pygame.Surface((WIDTH, HEIGHT))
+        for y in range(HEIGHT):
+            color_value = 200 - (y * 100 // HEIGHT)
+            pygame.draw.line(background, (color_value, color_value, 255), (0, y), (WIDTH, y))
+        return background
+
+
+# Создание пиксельных человечков разных цветов
+def create_pixel_man(skin_color=SKIN, shirt_color=BLUE, pants_color=JEANS):
+    surface = pygame.Surface((40, 60), pygame.SRCALPHA)
+
+    # Голова (10x10)
+    pygame.draw.rect(surface, skin_color, (15, 5, 10, 10))
+
+    # Тело (10x20) - рубашка
+    pygame.draw.rect(surface, shirt_color, (15, 15, 10, 20))
+
+    # Ноги (4x20 каждая) - штаны
+    pygame.draw.rect(surface, pants_color, (15, 35, 4, 20))
+    pygame.draw.rect(surface, pants_color, (21, 35, 4, 20))
+
+    # Руки (4x15 каждая) - кожа
+    pygame.draw.rect(surface, skin_color, (10, 15, 4, 15))
+    pygame.draw.rect(surface, skin_color, (26, 15, 4, 15))
+
+    # Глаза (пиксели)
+    surface.set_at((18, 8), BLACK)  # Левый глаз
+    surface.set_at((22, 8), BLACK)  # Правый глаз
+
+    # Рот (3 пикселя)
+    surface.set_at((18, 12), BLACK)
+    surface.set_at((19, 12), BLACK)
+    surface.set_at((20, 12), BLACK)
+
+    return surface
+
+
+# Создание разных скинов
+def create_skins():
+    skins = []
+
+    # Скин 1: Классический (синий)
+    skins.append(create_pixel_man(SKIN, BLUE, JEANS))
+
+    # Скин 2: Красный (красная рубашка, черные штаны)
+    skins.append(create_pixel_man(SKIN, RED, BLACK))
+
+    # Скин 3: Зеленый (зеленая рубашка, коричневые штаны)
+    skins.append(create_pixel_man(SKIN, GREEN, BROWN))
+
+    # Скин 4: Фиолетовый (фиолетовая рубашка, серые штаны)
+    skins.append(create_pixel_man(SKIN, PURPLE, GRAY))
+
+    # Скин 5: Оранжевый (оранжевая рубашка, синие штаны)
+    skins.append(create_pixel_man(SKIN, ORANGE, BLUE))
+
+    return skins
+
+
+# Класс кнопки
+class Button:
+    def __init__(self, x, y, width, height, text, font_size=24):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.text = text
+        self.font = pygame.font.SysFont(None, font_size)
+        self.is_hovered = False
+
+    def draw(self, surface):
+        color = BUTTON_HOVER_COLOR if self.is_hovered else BUTTON_COLOR
+        pygame.draw.rect(surface, color, self.rect, border_radius=10)
+        pygame.draw.rect(surface, BLACK, self.rect, 2, border_radius=10)
+
+        text_surface = self.font.render(self.text, True, WHITE)
+        text_rect = text_surface.get_rect(center=self.rect.center)
+        surface.blit(text_surface, text_rect)
+
+    def check_hover(self, mouse_pos):
+        self.is_hovered = self.rect.collidepoint(mouse_pos)
+        return self.is_hovered
+
+    def is_clicked(self, mouse_pos, mouse_click):
+        return self.rect.collidepoint(mouse_pos) and mouse_click
+
+
+# Параметры персонажа
+player_width, player_height = 40, 60
+player_x = 100
+player_y = 400
+player_speed = 5
+player_floor = 1
+facing_right = True
+
+# Параметры прыжка
+is_jumping = False
+jump_count = 0
+jump_height = 10  # Уменьшил высоту прыжка
+gravity = 1
+
+# Создаем скины и загружаем фон
+skins = create_skins()
+current_skin_index = 0
+character_sprite = skins[current_skin_index]
+character_flipped = pygame.transform.flip(character_sprite, True, False)
+
+background = load_background()
+
+# Создаем кнопку смены скина
+change_skin_button = Button(WIDTH - 150, 10, 140, 40, "Сменить скин")
+
+# Параметры этажей (измененные значения)
+floor_height = 100
+floor1_y = 500 - 200  # Подняли на 200px
+floor2_y = 300 - 20   # Подняли на 20px
+floor3_y = 100 + 150  # Опустили на 150px
+
+# Лестницы (x, y_начало, y_конец, ширина)
+stairs = [
+    {"x": 200, "start_y": floor1_y, "end_y": floor2_y, "width": 30, "active": False},
+    {"x": 400, "start_y": floor2_y, "end_y": floor3_y, "width": 30, "active": False},
+    {"x": 600, "start_y": floor1_y, "end_y": floor3_y, "width": 30, "active": False}
+]
+
+
+# Функция для получения Y-координаты текущего этажа
+def get_floor_y(floor):
+    if floor == 1:
+        return floor1_y
+    elif floor == 2:
+        return floor2_y
+    elif floor == 3:
+        return floor3_y
+    return floor1_y
+
+
+# Игровой цикл
+clock = pygame.time.Clock()
+running = True
+
+while running:
+    mouse_pos = pygame.mouse.get_pos()
+    mouse_click = False
+
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_SPACE and not is_jumping and not on_stairs:
+                is_jumping = True
+                jump_count = jump_height
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Левая кнопка мыши
+                mouse_click = True
+
+    # Проверка кнопки смены скина
+    change_skin_button.check_hover(mouse_pos)
+    if change_skin_button.is_clicked(mouse_pos, mouse_click):
+        current_skin_index = (current_skin_index + 1) % len(skins)
+        character_sprite = skins[current_skin_index]
+        character_flipped = pygame.transform.flip(character_sprite, True, False)
+
+    # Обработка клавиш
+    keys = pygame.key.get_pressed()
+
+    # Движение влево/вправо
+    if keys[pygame.K_LEFT]:
+        player_x -= player_speed
+        facing_right = False
+    if keys[pygame.K_RIGHT]:
+        player_x += player_speed
+        facing_right = True
+
+    # Проверка нахождения на лестнице
+    on_stairs = False
+    for stair in stairs:
+        if (player_x + player_width > stair["x"] and
+                player_x < stair["x"] + stair["width"]):
+
+            # Движение вверх/вниз по лестнице
+            if keys[pygame.K_UP]:
+                player_y -= player_speed
+                stair["active"] = True
+                on_stairs = True
+                is_jumping = False
+            elif keys[pygame.K_DOWN]:
+                player_y += player_speed
+                stair["active"] = True
+                on_stairs = True
+                is_jumping = False
+            else:
+                stair["active"] = False
+
+    # Обработка прыжка
+    if is_jumping:
+        player_y -= jump_count
+        jump_count -= gravity
+
+        if jump_count < -jump_height:
+            is_jumping = False
+            jump_count = 0
+
+    # Определение текущего этажа
+    if player_y > floor2_y + 50:
+        player_floor = 1
+        if not is_jumping and not on_stairs and player_y > floor1_y:
+            player_y = floor1_y
+    elif floor2_y - 50 < player_y <= floor2_y + 50:
+        player_floor = 2
+        if not is_jumping and not on_stairs and abs(player_y - floor2_y) < 10:
+            player_y = floor2_y
+    else:
+        player_floor = 3
+        if not is_jumping and not on_stairs and player_y < floor3_y:
+            player_y = floor3_y
+
+    # Применяем гравитацию
+    if not on_stairs and not is_jumping:
+        current_floor_y = get_floor_y(player_floor)
+        if player_y < current_floor_y:
+            player_y += gravity * 2
+        elif player_y > current_floor_y:
+            player_y = current_floor_y
+
+    # Ограничение движения
+    player_x = max(0, min(player_x, WIDTH - player_width))
+    player_y = max(0, min(player_y, HEIGHT - player_height))
+
+    # Отрисовка
+    screen.blit(background, (0, 0))
+
+    # Отрисовка этажей (полупрозрачных)
+    for y in [floor1_y, floor2_y, floor3_y]:
+        floor_surface = pygame.Surface((WIDTH, floor_height), pygame.SRCALPHA)
+        pygame.draw.rect(floor_surface, (*BROWN, 200), (0, 0, WIDTH, floor_height))
+        screen.blit(floor_surface, (0, y))
+
+        # Текстура пола
+        for x in range(0, WIDTH, 20):
+            pygame.draw.line(screen, (100, 50, 0, 150), (x, y), (x, y + floor_height), 1)
+
+    # Отрисовка лестниц
+    for stair in stairs:
+        color = GREEN if stair["active"] else GRAY
+        pygame.draw.rect(screen, color,
+                         (stair["x"], stair["end_y"],
+                          stair["width"], stair["start_y"] - stair["end_y"]))
+
+        step_height = 20
+        for step_y in range(int(stair["end_y"]), int(stair["start_y"]), step_height):
+            pygame.draw.line(screen, BLACK,
+                             (stair["x"], step_y),
+                             (stair["x"] + stair["width"], step_y), 2)
+
+    # Отрисовка персонажа
+    if facing_right:
+        screen.blit(character_sprite, (player_x, player_y))
+    else:
+        screen.blit(character_flipped, (player_x, player_y))
+
+    # Отрисовка кнопки
+    change_skin_button.draw(screen)
+
+    # Отображение информации
+    font = pygame.font.SysFont(None, 36)
+    floor_text = font.render(f"Этаж: {player_floor}", True, WHITE)
+    screen.blit(floor_text, (10, 10))
+
+    skin_text = font.render(f"Скин: {current_skin_index + 1}/{len(skins)}", True, WHITE)
+    screen.blit(skin_text, (10, 50))
+
+    jump_text = font.render(f"Прыжок: {'Да' if is_jumping else 'Нет'}", True, WHITE)
+    screen.blit(jump_text, (10, 90))
+
+    # Инструкция
+    instruction = font.render("Стрелки: движение, Пробел: прыжок, Вверх/Вниз: лестницы", True, WHITE)
+    screen.blit(instruction, (10, HEIGHT - 40))
+
+    # Обновление экрана
+    pygame.display.flip()
+    clock.tick(60)
+
+pygame.quit()
+sys.exit()
